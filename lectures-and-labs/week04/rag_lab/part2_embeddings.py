@@ -40,20 +40,11 @@ def load_documents(data_dir="data"):
     """
     documents = []
 
-    # TODO: Exercise 2.1
-    # Use sorted(os.listdir(data_dir)) to get the files in a stable order
-    # Keep only the .txt files
-    # Read each file and append a (filename, content) tuple to documents
-    #
-    # Hints:
-    # - Use os.path.join() to create full file paths
-    # - Use .endswith('.txt') to filter for text files
-    # - Use 'with open(filepath, 'r', encoding='utf-8')' to read files
-    #
-    # GitHub Copilot Prompt: "Read all text files from a directory and return a sorted list of (filename, content) tuples"
-
-    # YOUR CODE HERE
-    pass  # Remove this line when you add your code
+    for filename in sorted(os.listdir(data_dir)):
+        if filename.endswith(".txt"):
+            filepath = os.path.join(data_dir, filename)
+            with open(filepath, "r", encoding="utf-8") as file:
+                documents.append((filename, file.read()))
 
     return documents
 
@@ -72,24 +63,18 @@ def chunk_text(text, chunk_words=DEFAULT_CHUNK_WORDS, overlap_words=DEFAULT_OVER
     """
     chunks = []
 
-    # TODO: Exercise 2.2
-    # Split on words, not characters: a chunk that ends mid-word embeds
-    # badly and reads worse when it reaches the prompt.
-    #
-    # Algorithm:
-    # 1. words = text.split()
-    # 2. start = 0; step = chunk_words - overlap_words
-    # 3. Take words[start:start + chunk_words], join them with spaces, append
-    # 4. If that slice reached the end of the words, stop
-    # 5. Otherwise move start forward by step and repeat
-    #
-    # The overlap is why a fact sitting on a chunk boundary is still
-    # retrievable from at least one chunk.
-    #
-    # GitHub Copilot Prompt: "Split text into overlapping chunks of N words with M words of overlap"
+    if chunk_words <= 0 or overlap_words < 0 or overlap_words >= chunk_words:
+        raise ValueError("chunk_words must be positive and overlap_words must be smaller")
 
-    # YOUR CODE HERE
-    pass  # Remove this line when you add your code
+    words = text.split()
+    step = chunk_words - overlap_words
+    start = 0
+    while start < len(words):
+        chunk = words[start:start + chunk_words]
+        chunks.append(" ".join(chunk))
+        if start + chunk_words >= len(words):
+            break
+        start += step
 
     return chunks
 
@@ -107,17 +92,8 @@ def generate_embeddings(chunks, model_name=EMBEDDING_MODEL):
     """
     print(f"Loading embedding model: {model_name}...")
 
-    # TODO: Exercise 2.3
-    # 1. Load the SentenceTransformer model using model_name
-    # 2. Use model.encode() to generate embeddings for all chunks
-    # 3. Return the embeddings
-    #
-    # Note: model.encode() takes a list of strings and returns all embeddings at once
-    #
-    # GitHub Copilot Prompt: "Use sentence-transformers to encode a list of text chunks"
-
-    # YOUR CODE HERE
-    pass  # Remove this line when you add your code
+    model = SentenceTransformer(model_name)
+    return model.encode(chunks)
 
 
 def store_in_chromadb(chunks, embeddings, sources, collection_name=COLLECTION):
@@ -133,31 +109,23 @@ def store_in_chromadb(chunks, embeddings, sources, collection_name=COLLECTION):
     Returns:
         ChromaDB collection object
     """
-    # TODO: Exercise 2.4
-    # 1. client = chromadb.PersistentClient(path="./chroma_db")
-    # 2. Delete the collection if it already exists (wrap in try/except),
-    #    so every run starts fresh -- DIY 6 depends on that
-    # 3. collection = client.create_collection(
-    #        name=collection_name,
-    #        configuration={"hnsw": {"space": "cosine"}},
-    #    )
-    #    Cosine compares the DIRECTION of two embeddings, the usual choice for
-    #    text. ChromaDB then reports 1 - cosine as the distance, which part 3
-    #    turns back into a similarity.
-    # 4. collection.add(
-    #        documents=chunks,
-    #        embeddings=embeddings.tolist(),
-    #        metadatas=[{"source": s} for s in sources],
-    #        ids=[f"chunk_{i}" for i in range(len(chunks))]
-    #    )
-    #
-    # The metadata is what lets part 3 show where a hit came from and part 4
-    # say which document an answer used. Drop it and citation is impossible.
-    #
-    # GitHub Copilot Prompt: "Store text chunks, embeddings and per-chunk metadata in a ChromaDB collection"
+    client = chromadb.PersistentClient(path="./chroma_db")
+    try:
+        client.delete_collection(name=collection_name)
+    except chromadb.errors.NotFoundError:
+        pass
 
-    # YOUR CODE HERE
-    pass  # Remove this line when you add your code
+    collection = client.create_collection(
+        name=collection_name,
+        configuration={"hnsw": {"space": "cosine"}},
+    )
+    collection.add(
+        documents=chunks,
+        embeddings=embeddings.tolist(),
+        metadatas=[{"source": source} for source in sources],
+        ids=[f"chunk_{index}" for index in range(len(chunks))],
+    )
+    return collection
 
 
 def main():
@@ -204,9 +172,15 @@ def main():
     print(f"  shortest: {min(lengths)} words")
     print(f"  longest:  {max(lengths)} words")
     if len(all_chunks) > 1:
-        opening = " ".join(all_chunks[1].split()[:5])
-        print(f'Overlap check: chunk 1 begins "{opening}..." -- those words also sit '
-              f'inside chunk 0: {opening in all_chunks[0]}')
+        print("\nChunk 0:")
+        print(all_chunks[0])
+        print("\nChunk 1:")
+        print(all_chunks[1])
+        first_words = all_chunks[0].split()
+        second_words = all_chunks[1].split()
+        shared_words = min(overlap, len(first_words), len(second_words))
+        matches = first_words[-shared_words:] == second_words[:shared_words]
+        print(f"\nOverlap check: {shared_words}-word overlap matches: {matches}")
     print()
 
     # Step 3: Generate embeddings
